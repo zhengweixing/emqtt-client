@@ -9,15 +9,19 @@
 
 -record(state, {mod, clientid, opts, client, topics = [], child_state}).
 
--type message() :: {deliver, ClientId :: binary(), Message :: map()} |
-                   {puback, ClientId :: binary(), Ack :: map()}.
+-type message() :: {deliver,  Message :: map()} |
+                   {puback,  Ack :: map()}.
 
 -callback start(ClientId :: binary()) ->
     {ok, State :: any()} | {error, Reason :: any()}.
 
--callback handle_msg(Info, State) -> ok | {ok, State} when
+-callback handle_msg(Info, ClientId, State) -> ok | {ok, State} when
     Info :: message(),
+    ClientId :: binary(),
     State :: any().
+
+-callback stop(Reason :: any(), ClientId :: binary(), State :: any()) ->
+    ok.
 
 subscribe(Pid, Topic, SubOpts) ->
     gen_server:call(Pid, {sub, Topic, SubOpts}).
@@ -110,7 +114,7 @@ handle_cast(_Request, State = #state{}) ->
     {noreply, State}.
 
 handle_info({publish, Msg}, #state{mod = Mod, clientid = ClientId} = State) ->
-    case Mod:handle_msg({deliver, ClientId, Msg}, State#state.child_state) of
+    case Mod:handle_msg({deliver,  Msg}, ClientId, State#state.child_state) of
         ok ->
             {noreply, State};
         {ok, NewChildState} ->
@@ -118,7 +122,7 @@ handle_info({publish, Msg}, #state{mod = Mod, clientid = ClientId} = State) ->
     end;
 
 handle_info({puback, Ack}, #state{ mod = Mod, clientid = ClientId } = State) ->
-    case Mod:handle_msg({puback, ClientId, Ack}, State#state.child_state) of
+    case Mod:handle_msg({puback, Ack}, ClientId, State#state.child_state) of
         ok ->
             {noreply, State};
         {ok, NewChildState} ->
@@ -145,8 +149,8 @@ handle_info(Info, State = #state{}) ->
     logger:error("unexpected msg ~p, ~p~n", [Info, State]),
     {noreply, State}.
 
-terminate(Reason, State = #state{ mod = Mod }) ->
-    Mod:stop(Reason, State#state.child_state),
+terminate(Reason, State = #state{ clientid = ClientId, mod = Mod }) ->
+    Mod:stop(Reason, ClientId, State#state.child_state),
     ok.
 
 code_change(_OldVsn, State = #state{}, _Extra) ->
