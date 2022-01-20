@@ -36,8 +36,8 @@ publish(Pid, Topic, Payload, PubOpts) ->
 start(Mod, Opts) ->
     supervisor:start_child(emqttc_sup, [Mod, Opts]).
 
-start(Name, Mod, Opts) ->
-    supervisor:start_child(emqttc_sup, [Name, Mod, Opts]).
+start(ClientId, Mod, Opts) ->
+    supervisor:start_child(emqttc_sup, [ClientId, Mod, Opts]).
 
 stop(Pid) ->
     gen_server:call(Pid, stop).
