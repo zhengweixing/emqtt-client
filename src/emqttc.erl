@@ -2,7 +2,7 @@
 
 -behaviour(gen_server).
 
--export([start/3, start/2, stop/1, subscribe/3, publish/4, unsubscribe/2]).
+-export([start/3, start/4, stop/1, subscribe/3, publish/4, unsubscribe/2]).
 -export([start_link/4, start_link/3]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
@@ -33,11 +33,11 @@ publish(Pid, Topic, Payload, PubOpts) ->
     gen_server:call(Pid, {pub, Topic, Payload, PubOpts}).
 
 
-start(Mod, Opts) ->
-    supervisor:start_child(emqttc_sup, [Mod, Opts]).
-
 start(ClientId, Mod, Opts) ->
     supervisor:start_child(emqttc_sup, [ClientId, Mod, Opts]).
+
+start(Name, ClientId, Mod, Opts) ->
+    supervisor:start_child(emqttc_sup, [Name, ClientId, Mod, Opts]).
 
 stop(Pid) ->
     gen_server:call(Pid, stop).
