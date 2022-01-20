@@ -8,7 +8,7 @@ mqtt client for erlang
 
 -export([start/0]).
 
--export([start/1, handle_msg/3, stop/3]).
+-export([init/1, handle_msg/3, stop/3]).
 
 -record(state, {}).
 
@@ -24,7 +24,7 @@ start() ->
     emqttc:publish(Pid, <<"test">>, <<"hello">>, [{qos, 1}]).
 
 
-start(ClientId) ->
+init(ClientId) ->
     io:format("~p connect successful!~n", [ClientId]),
     {ok, #state{}}.
 

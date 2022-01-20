@@ -53,7 +53,7 @@ start_link(Name, ClientId, Mod, Opts) ->
 init([ClientId, Mod, Opts]) ->
     case do_connect(ClientId, Opts) of
         {ok, ConnPid, _Props} ->
-            case Mod:start(ClientId) of
+            case Mod:init(ClientId) of
                 {ok, ChildState} ->
                     process_flag(trap_exit, true),
                     {ok, #state{
