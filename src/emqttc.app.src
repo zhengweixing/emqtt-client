@@ -5,7 +5,8 @@
   {mod, {emqttc_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    emqtt
    ]},
   {env,[]},
   {modules, []},
