@@ -9,11 +9,10 @@
 
 -record(state, {mod, clientid, opts, client, topics = [], child_state}).
 
--type message() :: {deliver,  Message :: map()} |
-                   {puback,  Ack :: map()}.
+-type message() :: {deliver,  Message :: map()} | {puback,  Ack :: map()}.
 
--callback start(ClientId :: binary()) ->
-    {ok, State :: any()} | {error, Reason :: any()}.
+-callback init(ClientId :: binary()) ->
+    {ok, State :: any()} | {ok, Topics :: list(), State :: any()} | {error, Reason :: any()}.
 
 -callback handle_msg(Info, ClientId, State) -> ok | {ok, State} when
     Info :: message(),
@@ -51,29 +50,18 @@ start_link(Name, ClientId, Mod, Opts) ->
 
 
 init([ClientId, Mod, Opts]) ->
-    case do_connect(ClientId, Opts) of
-        {ok, ConnPid, _Props} ->
-            case Mod:init(ClientId) of
-                {ok, ChildState} ->
-                    process_flag(trap_exit, true),
-                    {ok, #state{
-                        clientid = ClientId,
-                        mod = Mod,
-                        opts = Opts,
-                        child_state = ChildState,
-                        client = ConnPid
-                    }};
-                {stop, Reason} ->
-                    {stop, Reason}
-            end;
+    process_flag(trap_exit, true),
+    State = #state{ mod = Mod, clientid = ClientId, opts = Opts },
+    case do_connect(State) of
+        {ok, NewState} ->
+            {ok, NewState};
         {error, Reason} ->
             {stop, Reason}
     end.
 
 handle_call(stop, _From, #state{client = ConnPid} = State) ->
-    ok = emqtt:disconnect(ConnPid),
-    ok = emqtt:stop(ConnPid),
-    {stop, normal, ok, State};
+    Reply = emqtt:disconnect(ConnPid),
+    {reply, Reply, State};
 
 handle_call({pub, Topic, Payload, PubOpts}, _From, #state{client = Client} = State) ->
     Reply =
@@ -94,12 +82,13 @@ handle_call({unsub, Topic}, _From, #state{client = Client, topics = Topics} = St
     Reply = emqtt:unsubscribe(Client, #{}, Topic),
     {reply, Reply, State#state{topics = lists:delete(Topic, Topics)}};
 
-handle_call({sub, Topic, SubOpts}, _From, #state{topics = Topics} = State) ->
+handle_call({sub, Topic, SubOpts}, _From, #state{client = Client, topics = Topics} = State) ->
     case lists:keyfind(Topic, 1, Topics) of
         false ->
-            case do_subscribe(Topic, SubOpts, State) of
-                {ok, Properties, ReasonCode, NewState} ->
-                    {reply, {ok, Properties, ReasonCode}, NewState};
+            case do_subscribe(Client, Topic, SubOpts) of
+                {ok, Properties, ReasonCode} ->
+                    NewTopics = [{Topic, SubOpts} | Topics],
+                    {reply, {ok, Properties, ReasonCode}, State#state{topics = NewTopics}};
                 {error, Reason} ->
                     {reply, {error, Reason}, State}
             end;
@@ -130,15 +119,18 @@ handle_info({puback, Ack}, #state{ mod = Mod, clientid = ClientId } = State) ->
     end;
 
 handle_info({'EXIT', Pid, Reason}, #state{client = Pid} = State) ->
-    logger:error("MQTT Client ~p stop, ~p~n", [Pid, Reason]),
-    handle_info(reconnect, State);
+    case Reason of
+        normal ->
+            {stop, normal, State};
+        _ ->
+            logger:error("MQTT Client ~p stop, ~p~n", [Pid, Reason]),
+            handle_info(reconnect, State)
+    end;
 
-handle_info(reconnect, #state{clientid = ClientId, opts = Opts} = State) ->
-    case do_connect(ClientId, Opts) of
-        {ok, Pid, _} ->
-            Topics = State#state.topics,
-            [do_subscribe(Topic, SubOpts, State#state{client = Pid}) || {Topic, SubOpts} <- Topics],
-            {noreply, State#state{client = Pid}};
+handle_info(reconnect, #state{clientid = ClientId} = State) ->
+    case do_connect(State) of
+        {ok, NewState} ->
+            {noreply, NewState};
         {error, Reason} ->
             logger:error("MQTT Client ~p stop, ~p~n", [ClientId, Reason]),
             erlang:send_after(5000, self(), reconnect),
@@ -157,12 +149,22 @@ code_change(_OldVsn, State = #state{}, _Extra) ->
     {ok, State}.
 
 
-do_connect(ClientId, Opts) ->
-    case emqtt:start_link([{owner, self()},{clientid, ClientId} | Opts]) of
-        {ok, ConnPid} ->
-            case emqtt:connect(ConnPid) of
-                {ok, Properties} ->
-                    {ok, ConnPid, Properties};
+do_connect(#state{ clientid = ClientId, mod = Mod, opts = Opts } = State) ->
+    case mqtt_connect(ClientId, Opts) of
+        {ok, _Properties, ConnPid} ->
+            case Mod:init(ClientId) of
+                {ok, Topics, ChildState} ->
+                    do_subscribe(ConnPid, Topics),
+                    {ok, State#state{
+                        topics = Topics,
+                        child_state = ChildState,
+                        client = ConnPid
+                    }};
+                {ok, ChildState} ->
+                    {ok, State#state{
+                        child_state = ChildState,
+                        client = ConnPid
+                    }};
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -170,11 +172,36 @@ do_connect(ClientId, Opts) ->
             {error, Reason}
     end.
 
-do_subscribe(Topic, SubOpts, #state{topics = OldTopics} = State) ->
-    case emqtt:subscribe(State#state.client, Topic, SubOpts) of
+mqtt_connect(ClientId, Opts) ->
+    case emqtt:start_link([{owner, self()},{clientid, ClientId} | Opts]) of
+        {ok, ConnPid} ->
+            case emqtt:connect(ConnPid) of
+                {ok, Properties} ->
+                    {ok, Properties, ConnPid};
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+do_subscribe(Client, Topics) ->
+    F =
+        fun({Topic, SubOpts}) ->
+            case do_subscribe(Client, Topic, SubOpts) of
+                {error, Reason} ->
+                    logger:error("client(~s) sub topic ~p error ~p", [Client, Topic, Reason]);
+                {ok, _, _} ->
+                    ok
+            end
+        end,
+    [F(Element) || Element <- Topics].
+
+
+do_subscribe(Client, Topic, SubOpts) ->
+    case emqtt:subscribe(Client, Topic, SubOpts) of
         {ok, Properties, ReasonCode} ->
-            Topics1 = [{Topic, SubOpts} | OldTopics],
-            {ok, Properties, ReasonCode, State#state{topics = Topics1}};
+            {ok, Properties, ReasonCode};
         {error, Reason} ->
             {error, Reason}
     end.
