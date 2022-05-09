@@ -37,5 +37,15 @@ stop(Reason, ClientId, _State) ->
     ok.
 ```
 
+## Use
+
+Add the plugin to your rebar config:
+
+```
+{emqttc, {git, "https://github.com/zhengweixing/emqtt_client.git",
+        {branch, main}}}
+```
+
+
 ## License
 Apache License Version 2.0
