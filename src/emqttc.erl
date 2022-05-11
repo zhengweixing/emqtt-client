@@ -136,8 +136,7 @@ handle_info(reconnect, #state{client_id = ClientId} = State) ->
             {noreply, State#state{client = undefined}}
     end;
 
-handle_info(Info, State = #state{}) ->
-    logger:error("unexpected msg ~p, ~p~n", [Info, State]),
+handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
 terminate(Reason, State = #state{ mod = Mod }) ->
