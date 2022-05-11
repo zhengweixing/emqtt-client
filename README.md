@@ -8,9 +8,9 @@ mqtt client for erlang
 
 -export([start/0]).
 
--export([init/1, handle_msg/3, stop/3]).
+-export([init/1, handle_msg/2, stop/2]).
 
--record(state, {}).
+-record(state, { id }).
 
 start() ->
     Opts = [
@@ -26,14 +26,14 @@ start() ->
 
 init(ClientId) ->
     io:format("~p connect successful!~n", [ClientId]),
-    {ok, #state{}}.
+    {ok, #state{ id = clientId }}.
 
-handle_msg(Info, ClientId, _State) ->
-    io:format("Client(~p) handle msg ~p~n", [ClientId, Info]),
+handle_msg(Info, State) ->
+    io:format("Client(~p) handle msg ~p~n", [State#state.id, Info]),
     ok.
 
-stop(Reason, ClientId, _State) ->
-    io:format("Client(~p) stop reason:~p~n", [ClientId, Reason]),
+stop(Reason, State) ->
+    io:format("Client(~p) stop reason:~p~n", [State#state.id, Reason]),
     ok.
 ```
 

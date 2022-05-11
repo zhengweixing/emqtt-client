@@ -7,16 +7,15 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 
--record(state, {mod, clientid, opts, client, topics = [], child_state}).
+-record(state, {mod, client_id, opts, client, topics = [], child_state}).
 
 -type message() :: {deliver,  Message :: map()} | {puback,  Ack :: map()}.
 
 -callback init(ClientId :: binary()) ->
     {ok, State :: any()} | {ok, Topics :: list(), State :: any()} | {error, Reason :: any()}.
 
--callback handle_msg(Info, ClientId, State) -> ok | {ok, State} when
+-callback handle_msg(Info, State) -> ok | {ok, State} when
     Info :: message(),
-    ClientId :: binary(),
     State :: any().
 
 -callback stop(Reason :: any(), ClientId :: binary(), State :: any()) ->
@@ -51,7 +50,7 @@ start_link(Name, ClientId, Mod, Opts) ->
 
 init([ClientId, Mod, Opts]) ->
     process_flag(trap_exit, true),
-    State = #state{ mod = Mod, clientid = ClientId, opts = Opts },
+    State = #state{ mod = Mod, client_id = ClientId, opts = Opts },
     case do_connect(State) of
         {ok, NewState} ->
             {ok, NewState};
@@ -102,16 +101,16 @@ handle_call(_Request, _From, State = #state{}) ->
 handle_cast(_Request, State = #state{}) ->
     {noreply, State}.
 
-handle_info({publish, Msg}, #state{mod = Mod, clientid = ClientId} = State) ->
-    case Mod:handle_msg({deliver,  Msg}, ClientId, State#state.child_state) of
+handle_info({publish, Msg}, #state{mod = Mod} = State) ->
+    case Mod:handle_msg({deliver,  Msg}, State#state.child_state) of
         ok ->
             {noreply, State};
         {ok, NewChildState} ->
             {noreply, State#state{child_state = NewChildState}}
     end;
 
-handle_info({puback, Ack}, #state{ mod = Mod, clientid = ClientId } = State) ->
-    case Mod:handle_msg({puback, Ack}, ClientId, State#state.child_state) of
+handle_info({puback, Ack}, #state{ mod = Mod } = State) ->
+    case Mod:handle_msg({puback, Ack}, State#state.child_state) of
         ok ->
             {noreply, State};
         {ok, NewChildState} ->
@@ -127,7 +126,7 @@ handle_info({'EXIT', Pid, Reason}, #state{client = Pid} = State) ->
             handle_info(reconnect, State)
     end;
 
-handle_info(reconnect, #state{clientid = ClientId} = State) ->
+handle_info(reconnect, #state{client_id = ClientId} = State) ->
     case do_connect(State) of
         {ok, NewState} ->
             {noreply, NewState};
@@ -141,15 +140,15 @@ handle_info(Info, State = #state{}) ->
     logger:error("unexpected msg ~p, ~p~n", [Info, State]),
     {noreply, State}.
 
-terminate(Reason, State = #state{ clientid = ClientId, mod = Mod }) ->
-    Mod:stop(Reason, ClientId, State#state.child_state),
+terminate(Reason, State = #state{ mod = Mod }) ->
+    Mod:stop(Reason, State#state.child_state),
     ok.
 
 code_change(_OldVsn, State = #state{}, _Extra) ->
     {ok, State}.
 
 
-do_connect(#state{ clientid = ClientId, mod = Mod, opts = Opts } = State) ->
+do_connect(#state{ client_id = ClientId, mod = Mod, opts = Opts } = State) ->
     case mqtt_connect(ClientId, Opts) of
         {ok, _Properties, ConnPid} ->
             case Mod:init(ClientId) of
@@ -173,7 +172,7 @@ do_connect(#state{ clientid = ClientId, mod = Mod, opts = Opts } = State) ->
     end.
 
 mqtt_connect(ClientId, Opts) ->
-    case emqtt:start_link([{owner, self()},{clientid, ClientId} | Opts]) of
+    case emqtt:start_link([{owner, self()},{client_id, ClientId} | Opts]) of
         {ok, ConnPid} ->
             case emqtt:connect(ConnPid) of
                 {ok, Properties} ->
