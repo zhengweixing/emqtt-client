@@ -172,7 +172,7 @@ do_connect(#state{ client_id = ClientId, mod = Mod, opts = Opts } = State) ->
     end.
 
 mqtt_connect(ClientId, Opts) ->
-    case emqtt:start_link([{owner, self()},{client_id, ClientId} | Opts]) of
+    case emqtt:start_link([{owner, self()},{clientid, binary_to_list(ClientId)} | Opts]) of
         {ok, ConnPid} ->
             case emqtt:connect(ConnPid) of
                 {ok, Properties} ->
