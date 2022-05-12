@@ -62,9 +62,13 @@ handle_call(stop, _From, #state{client = ConnPid} = State) ->
     Reply = emqtt:disconnect(ConnPid),
     {reply, Reply, State};
 
+
+
 handle_call({pub, Topic, Payload, PubOpts}, _From, #state{client = Client} = State) ->
     Reply =
-        case lists:keyfind(qos, 1, PubOpts) of
+        case is_pid(Client) andalso is_process_alive(Client) andalso lists:keyfind(qos, 1, PubOpts) of
+            false ->
+                {error, disconnected};
             0 ->
                 emqtt:publish(Client, Topic, #{}, Payload, PubOpts);
             _ ->
@@ -82,18 +86,24 @@ handle_call({unsub, Topic}, _From, #state{client = Client, topics = Topics} = St
     {reply, Reply, State#state{topics = lists:delete(Topic, Topics)}};
 
 handle_call({sub, Topic, SubOpts}, _From, #state{client = Client, topics = Topics} = State) ->
-    case lists:keyfind(Topic, 1, Topics) of
-        false ->
-            case do_subscribe(Client, Topic, SubOpts) of
-                {ok, Properties, ReasonCode} ->
-                    NewTopics = [{Topic, SubOpts} | Topics],
-                    {reply, {ok, Properties, ReasonCode}, State#state{topics = NewTopics}};
-                {error, Reason} ->
-                    {reply, {error, Reason}, State}
+    case is_pid(Client) andalso is_process_alive(Client) of
+        true ->
+            case  lists:keyfind(Topic, 1, Topics) of
+                false ->
+                    case do_subscribe(Client, Topic, SubOpts) of
+                        {ok, Properties, ReasonCode} ->
+                            NewTopics = [{Topic, SubOpts} | Topics],
+                            {reply, {ok, Properties, ReasonCode}, State#state{topics = NewTopics}};
+                        {error, Reason} ->
+                            {reply, {error, Reason}, State}
+                    end;
+                _ ->
+                    {reply, {error, duplicate}, State}
             end;
-        _ ->
-            {reply, {error, duplicate}, State}
+        false ->
+            {reply, {error, disconnected}, State}
     end;
+
 
 handle_call(_Request, _From, State = #state{}) ->
     {reply, ok, State}.
@@ -122,17 +132,18 @@ handle_info({'EXIT', Pid, Reason}, #state{client = Pid} = State) ->
         normal ->
             {stop, normal, State};
         _ ->
-            logger:error("MQTT Client ~p stop, ~p~n", [Pid, Reason]),
+            logger:error("MQTT Client ~p stop, Reason:~p~n", [Pid, Reason]),
             handle_info(reconnect, State)
     end;
 
-handle_info(reconnect, #state{client_id = ClientId} = State) ->
+handle_info(reconnect, #state{client_id = ClientId, opts = Opts} = State) ->
     case do_connect(State) of
         {ok, NewState} ->
             {noreply, NewState};
         {error, Reason} ->
-            logger:error("MQTT Client ~p stop, ~p~n", [ClientId, Reason]),
-            erlang:send_after(5000, self(), reconnect),
+            logger:warning("MQTT Client ~p reconnect error, Reason:~p~n", [ClientId, Reason]),
+            Time = proplists:get_value(reconnect, Opts, 5000),
+            erlang:send_after(Time, self(), reconnect),
             {noreply, State#state{client = undefined}}
     end;
 
