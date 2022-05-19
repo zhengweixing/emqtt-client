@@ -83,7 +83,7 @@ handle_call({pub, Topic, Payload, PubOpts}, _From, #state{client = Client} = Sta
 
 handle_call({unsub, Topic}, _From, #state{client = Client, topics = Topics} = State) ->
     Reply = do_call(unsubscribe, [Client, #{}, Topic]),
-    {reply, Reply, State#state{topics = lists:delete(Topic, Topics)}};
+    {reply, Reply, State#state{topics = lists:keydelete(Topic, 1, Topics)}};
 
 handle_call({sub, Topic, SubOpts}, _From, #state{client = Client, client_id = ClientId, topics = Topics} = State) ->
     case is_pid(Client) andalso is_process_alive(Client) of
